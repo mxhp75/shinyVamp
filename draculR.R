@@ -5,7 +5,7 @@ library(shiny)
 library(ggrepel)
 library(scales) # For percent_format()
 library(tidyr)
-library(tidyverse)
+library(edgeR)
 library(readr)
 library(psych)
 
@@ -235,7 +235,7 @@ server <- function(input, output) {
                  xintercept = 1.9,
                  col = 2,
                  lty = 2) +
-      scale_y_continuous(labels = percent_format()) +
+      scale_y_continuous(labels = scales::percent_format()) +
       labs(
         title = "Distribution difference using final classifiers",
         subtitle = "based on three classification groups",
@@ -257,7 +257,7 @@ server <- function(input, output) {
   })
   
   ## Info for the Import New Data tab
-  # this reactive output contains the summary of the dataset and display the summary in table format
+  # this reactive output contains the dataset and display the file information
   output$about <- renderTable({
     if(is.null(uploadData())){return ()}
     input$rawDataFile
@@ -266,7 +266,50 @@ server <- function(input, output) {
   # this reactive output contains the summary of the dataset and display the summary in table format
   output$sum <- renderTable({
     if(is.null(uploadData())){return ()}
-    summary(uploadData())
+    
+    # create the rank table for use in the figure and table
+    # uploadData()
+    
+    # attach the data() object to counts - might remove this step and use uploadData() in the future?
+    counts <- uploadData() %>% 
+      dplyr::mutate_if(is.integer, as.numeric) %>%
+      as.data.frame() %>% 
+      tibble::column_to_rownames("mir_name") %>% 
+      replace(is.na(.), 0)
+    
+    # identify samples with < 1 million reads
+    lowCounts <- names(counts[, base::colSums(counts) < 1000000])
+    
+    # remove columns/samples with readcouns less than 1 million
+    counts <- counts[, base::colSums(counts) > 1000000]
+    
+    # reduce any individual count less than five to zero
+    counts[counts < 5] <- 0
+    
+    # remove miRNAs with zero counts in all samples
+    counts <- counts[ base::rowSums(counts)!=0, ]
+    
+    # create the (super) minimal metadata table
+    meta <- dplyr::data_frame(samplename = base::colnames(counts)) %>% 
+      dplyr::mutate(., copy = samplename) %>% 
+      tidyr::separate(., col = copy, into = c("ID", "condition"), sep = "_")
+    
+    # rank the samples by read counts and by unique miRs
+    # this table will be joined downstream with the distribution difference table
+    rank <- base::as.data.frame(base::colSums(counts)) %>%
+      magrittr::set_colnames(., "readCounts") %>% 
+      dplyr::arrange(., -(readCounts)) %>% 
+      tibble::rownames_to_column("samplename") %>% 
+      dplyr::left_join(., meta, by = "samplename") %>% 
+      dplyr::select(., samplename, readCounts, condition) %>% 
+      dplyr::mutate(., rank_readCounts = 1:nrow(.)) %>% 
+      dplyr::full_join(.,
+                       as.data.frame(t(numcolwise(nonzero)(as.data.frame(counts)))) %>%
+                         tibble::rownames_to_column() %>%
+                         magrittr::set_colnames(., c("samplename", "unique_miRs")) %>%
+                         arrange(., desc(unique_miRs)) %>%
+                         mutate(., rank_unique = 1:nrow(.)),
+                       by = "samplename")
     
   })
   
@@ -349,17 +392,137 @@ server <- function(input, output) {
     
   })
   
-  # This reactive output contains the dataset and display the figure
+  # This reactive output contains new objects and will display the histogram of 
+  # distribution difference
   output$dist_diff <- renderPlot({
     if(is.null(uploadData())){return ()}
-    uploadData()
+
+    # uploadData()
+    
+    counts <- uploadData() %>% 
+      dplyr::mutate_if(is.integer, as.numeric) %>%
+      as.data.frame() %>% 
+      tibble::column_to_rownames("mir_name") %>% 
+      replace(is.na(.), 0)
+    
+    # identify samples with < 1 million reads
+    lowCounts <- names(counts[, base::colSums(counts) < 1000000])
+    
+    # remove columns/samples with readcouns less than 1 million
+    counts <- counts[, base::colSums(counts) > 1000000]
+    
+    # reduce any individual count less than five to zero
+    counts[counts < 5] <- 0
+    
+    # remove miRNAs with zero counts in all samples
+    counts <- counts[ base::rowSums(counts)!=0, ]
+    
+    # create the (super) minimal metadata table
+    meta <- dplyr::data_frame(samplename = base::colnames(counts)) %>% 
+      dplyr::mutate(., copy = samplename) %>% 
+      tidyr::separate(., col = copy, into = c("ID", "condition"), sep = "_")
+    
+    # establish a DGEList object
+    DGEList_public <- DGEList(counts = counts,
+                              samples = meta)
+    
+    is.na(DGEList_public$counts) %>% table()
+    
+    # calculate normalisation factors and apply to the DGEList object
+    DGEList_public <- calcNormFactors(DGEList_public, method = "TMM")
+    
+    # calculate the CPMs
+    rawCPM <- cpm(DGEList_public, log = FALSE)
+    # remove low expressed genes
+    keep.exprs <- rowSums(rawCPM > 40) >= 12
+    DGEList_public <- DGEList_public[keep.exprs,, keep.lib.sizes = FALSE]
+    
+    ## calculate the difference between the geometric mean of the distributions
+    ### here we calculate the geometric mean of the classifier distribution and the
+    ### "other" ensuring those taken from the classifier list are not included in
+    ### other.
+    # create a vector of sample names for use in the lapply
+    varc <- dplyr::select(DGEList_public$samples, samplename) %>%
+      tibble::remove_rownames() %>% 
+      dplyr::pull(., samplename)
+    
+    classifier_miRs <- data.frame(
+      SYMBOL = c(
+        "hsa-miR-106b-3p",
+        "hsa-miR-140-3p",
+        "hsa-miR-142-5p",
+        "hsa-miR-532-5p",
+        "hsa-miR-17-5p",
+        "hsa-miR-19b-3p",
+        "hsa-miR-30c-5p",
+        "hsa-miR-324-5p",
+        "hsa-miR-192-5p",
+        "hsa-miR-660-5p",
+        "hsa-miR-186-5p",
+        "hsa-miR-425-5p",
+        "hsa-miR-25-3p",
+        "hsa-miR-363-3p",
+        "hsa-miR-183-5p",
+        "hsa-miR-451a",
+        "hsa-miR-182-5p",
+        "hsa-miR-191-5p",
+        "hsa-miR-194-5p",
+        "hsa-miR-20b-5p"
+      ))
+    
+    # project specific miRs to be dropped
+    project_miRs <- data.frame(SYMBOL = c("hsa-miR-186-5p",
+                                          "hsa-miR-425-5p",
+                                          "hsa-miR-25-3p",
+                                          "hsa-miR-363-3p",
+                                          "hsa-miR-183-5p",
+                                          "hsa-miR-451a",
+                                          "hsa-miR-182-5p",
+                                          "hsa-miR-191-5p",
+                                          "hsa-miR-194-5p",
+                                          "hsa-miR-20b-5p"))
+    
+    
+    # define the dropped classifiers
+    dropped <- subset(classifier_miRs, SYMBOL %in% project_miRs$SYMBOL)
+    
+    # define the final set of classifiers
+    final_classifiers <- subset(classifier_miRs, SYMBOL %notin% project_miRs$SYMBOL)
+
+ 
+    # calculate the distribution difference between the final classifier miRs (ie after removing pregnancy associated)
+    
+    distributionDifference <- lapply(varc, function(x){
+      # calculate the geometric mean of the two distributions (1 = classifier, 0 = other, 2 = dropped)
+
+      cdat <- ddply(
+        dplyr::select(
+          as.data.frame(edgeR::cpm(DGEList_public$counts, log = TRUE)), x) %>%
+          tibble::rownames_to_column("mirna") %>% 
+          mutate(., classifier = as.factor(ifelse(mirna %in% final_classifiers$SYMBOL, 1,
+                                                  ifelse(mirna %in% dropped$SYMBOL, 2,
+                                                         ifelse(mirna %notin% classifier_miRs$SYMBOL, 0, NA))))),
+        "classifier", summarise, geometric.mean = psych::geometric.mean(get(x), na.rm = TRUE)
+      )
+
+
+      # calculate the difference between the two geometric means (classifier-other)  
+      dplyr::filter(cdat, classifier == 1)$geometric.mean - dplyr::filter(cdat, classifier == 0)$geometric.mean
+      
+    })
+
+
+    # ggplot(data = as.data.frame(DGEList_public$counts),
+    #        aes(x = NPC0031_NPC,
+    #        y = PAC0062_PAC)) +
+    #   geom_point()
   })
   
   # the following renderUI is used to dynamically generate the tabsets when the
   # file is loaded. Until the file is loaded, app will not show the tabset.
   output$tb <- renderUI({
     if(is.null(uploadData()))
-      h3("Test your own plasma miR_Seq data using ", tags$img(src = "drac.png",
+      tags$h3("Test your own plasma miR-Seq data using ", tags$img(src = "drac.png",
                                                       heigth = 200,
                                                       width = 200))
     else
@@ -370,8 +533,8 @@ server <- function(input, output) {
                   tabPanel("Distribution Difference", plotOutput("dist_diff")))
   })
   
-   
   
 }
 
 shinyApp(ui = ui, server = server)
+
