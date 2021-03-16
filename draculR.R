@@ -5,7 +5,15 @@ library(shiny)
 library(ggrepel)
 library(scales) # For percent_format()
 library(tidyr)
+library(tidyverse)
 library(readr)
+library(psych)
+
+# User defined functions
+# negate %in%
+`%notin%` <- Negate(`%in%`)
+# function (x) to count the number of non-zero records in each column (ie per sample)
+nonzero <- function(x) sum(x != 0)
 
 # import our distribution difference dataframe
 plotData_distDiff_dCq <- read_csv("www/plotData_distDiff_dCq.csv")
@@ -97,7 +105,9 @@ ui <- fluidPage(navbarPage(title = "draculR",
                                         checkboxInput(inputId = "stringAsFactors",
                                                       label = "stringAsFactors",
                                                       value = FALSE),
-                                        br(),
+                                        h5(helpText("Add a project title")),
+                                        textInput("project", "Project", "myProjectName"),
+                                        verbatimTextOutput("value"),
                                         radioButtons(inputId = 'sep',
                                                      label = 'Separator',
                                                      choices = c(Comma = ',',
@@ -142,9 +152,10 @@ ui <- fluidPage(navbarPage(title = "draculR",
   
 
 server <- function(input, output) {
+  
   # This reactive function will take the inputs from UI.R and use them for read.table() to read the data from the file. It returns the dataset in the form of a dataframe.
   # file$datapath -> gives the path of the file
-  data <- reactive({
+  uploadData <- reactive({
     file1 <- input$rawDataFile
     if(is.null(file1)){return()} 
     read.table(file = file1$datapath,
@@ -248,42 +259,109 @@ server <- function(input, output) {
   ## Info for the Import New Data tab
   # this reactive output contains the summary of the dataset and display the summary in table format
   output$about <- renderTable({
-    if(is.null(data())){return ()}
+    if(is.null(uploadData())){return ()}
     input$rawDataFile
   })
   
   # this reactive output contains the summary of the dataset and display the summary in table format
   output$sum <- renderTable({
-    if(is.null(data())){return ()}
-    summary(data())
+    if(is.null(uploadData())){return ()}
+    summary(uploadData())
     
   })
   
   # This reactive output contains the dataset and display the dataset in table format
   output$table <- renderTable({
-    if(is.null(data())){return ()}
-    data()
+    if(is.null(uploadData())){return ()}
+    uploadData() %>% 
+      dplyr::mutate_if(is.integer, as.numeric) %>%
+      replace(is.na(.), 0)
   })
   
-  # This reactive output contains the dataset and display the figure
+  # This reactive output contains the dataset and will render the
+  # mature miRNA as a function of read depth scatter plot
   output$mature_mirna <- renderPlot({
-    if(is.null(data())){return ()}
-    data()
+    if(is.null(uploadData())){return ()}
+    
+    
+    # create the rank table for use in the figure and table
+    # uploadData()
+    
+    # attach the data() object to counts - might remove this step and use uploadData() in the future?
+    counts <- uploadData() %>% 
+      dplyr::mutate_if(is.integer, as.numeric) %>%
+      as.data.frame() %>% 
+      tibble::column_to_rownames("mir_name") %>% 
+      replace(is.na(.), 0)
+    
+    # identify samples with < 1 million reads
+    lowCounts <- names(counts[, base::colSums(counts) < 1000000])
+    
+    # remove columns/samples with readcouns less than 1 million
+    counts <- counts[, base::colSums(counts) > 1000000]
+    
+    # reduce any individual count less than five to zero
+    counts[counts < 5] <- 0
+    
+    # remove miRNAs with zero counts in all samples
+    counts <- counts[ base::rowSums(counts)!=0, ]
+    
+    # create the (super) minimal metadata table
+    meta <- dplyr::data_frame(samplename = base::colnames(counts)) %>% 
+      dplyr::mutate(., copy = samplename) %>% 
+      tidyr::separate(., col = copy, into = c("ID", "condition"), sep = "_")
+    
+    # rank the samples by read counts and by unique miRs
+    # this table will be joined downstream with the distribution difference table
+    rank <- base::as.data.frame(base::colSums(counts)) %>%
+      magrittr::set_colnames(., "readCounts") %>% 
+      dplyr::arrange(., -(readCounts)) %>% 
+      tibble::rownames_to_column("samplename") %>% 
+      dplyr::left_join(., meta, by = "samplename") %>% 
+      dplyr::select(., samplename, readCounts, condition) %>% 
+      dplyr::mutate(., rank_readCounts = 1:nrow(.)) %>% 
+      dplyr::full_join(.,
+                as.data.frame(t(numcolwise(nonzero)(as.data.frame(counts)))) %>%
+                  tibble::rownames_to_column() %>%
+                  magrittr::set_colnames(., c("samplename", "unique_miRs")) %>%
+                  arrange(., desc(unique_miRs)) %>%
+                  mutate(., rank_unique = 1:nrow(.)),
+                by = "samplename")
+    
+    ggplot2::ggplot(data = rank,
+           aes(x = readCounts,
+               y = unique_miRs,
+               size = 4)
+    ) +
+      scale_size(guide = "none") +
+      geom_point() +
+      scale_x_continuous(name = "Filtered Read Counts",
+                         breaks = seq(round_any(min(rank$readCounts), 10, f = floor), max(rank$readCounts), 1500000)) +
+      scale_y_continuous(name = "Mature miRNA Identified",
+                         breaks = seq(round_any(min(rank$unique_miRs), 10, f = floor), max(rank$unique_miRs), 50)) +
+      stat_smooth(method = 'loess',
+                  se = FALSE,
+                  size = 2) +
+      theme_bw(base_size = 16) +
+      ggtitle(paste("Mature miRNA as a function of read counts in ", input$project, sep = "")) +
+      theme(axis.text.x = element_text(angle = 270, hjust = 1))
+    
+    
   })
   
   # This reactive output contains the dataset and display the figure
   output$dist_diff <- renderPlot({
-    if(is.null(data())){return ()}
-    data()
+    if(is.null(uploadData())){return ()}
+    uploadData()
   })
   
   # the following renderUI is used to dynamically generate the tabsets when the
   # file is loaded. Until the file is loaded, app will not show the tabset.
   output$tb <- renderUI({
-    if(is.null(data()))
-      h3("Test your own plasma data using ", tags$img(src = "drac.png",
-                                   heigth = 200,
-                                   width = 200))
+    if(is.null(uploadData()))
+      h3("Test your own plasma miR_Seq data using ", tags$img(src = "drac.png",
+                                                      heigth = 200,
+                                                      width = 200))
     else
       tabsetPanel(tabPanel("About file", tableOutput("about")),
                   tabPanel("Data", tableOutput("table")),
