@@ -490,28 +490,84 @@ server <- function(input, output) {
     final_classifiers <- subset(classifier_miRs, SYMBOL %notin% project_miRs$SYMBOL)
 
  
-    # calculate the distribution difference between the final classifier miRs (ie after removing pregnancy associated)
-    
-    distributionDifference <- lapply(varc, function(x){
-      # calculate the geometric mean of the two distributions (1 = classifier, 0 = other, 2 = dropped)
-
-      cdat <- ddply(
-        dplyr::select(
-          as.data.frame(edgeR::cpm(DGEList_public$counts, log = TRUE)), x) %>%
-          tibble::rownames_to_column("mirna") %>% 
-          mutate(., classifier = as.factor(ifelse(mirna %in% final_classifiers$SYMBOL, 1,
-                                                  ifelse(mirna %in% dropped$SYMBOL, 2,
-                                                         ifelse(mirna %notin% classifier_miRs$SYMBOL, 0, NA))))),
-        "classifier", summarise, geometric.mean = psych::geometric.mean(get(x), na.rm = TRUE)
-      )
-
-
-      # calculate the difference between the two geometric means (classifier-other)  
-      dplyr::filter(cdat, classifier == 1)$geometric.mean - dplyr::filter(cdat, classifier == 0)$geometric.mean
+    distributionDifference <- for (i in 1:length(varc)){
       
-    })
+      function(x){
+        
+        x <- varc[i]
+        
+        # calculate the geometric mean of the two distributions (1 = classifier, 0 = other, 2 = dropped) 
+        cdat <- ddply(
+          dplyr::select(
+            as.data.frame(cpm(DGEList_public$counts, log = TRUE)), x) %>%
+            tibble::rownames_to_column("mirna") %>% 
+            mutate(., classifier = as.factor(ifelse(mirna %in% final_classifiers$SYMBOL, 1,
+                                                    ifelse(mirna %in% dropped$SYMBOL, 2,
+                                                           ifelse(mirna %notin% classifier_miRs$SYMBOL, 0, NA))))),
+          "classifier", summarise, geometric.mean = psych::geometric.mean(get(x), na.rm = TRUE)
+        )
+        
+        # calculate the difference between the two geometric means (classifier-other)  
+        dplyr::filter(cdat, classifier == 1)$geometric.mean - dplyr::filter(cdat, classifier == 0)$geometric.mean
+        
+      }}
 
-
+    names(distributionDifference) <- varc
+    
+    unlist_distributionDifference <- do.call(cbind.data.frame, distributionDifference) %>% 
+      t() %>%
+      set_colnames("distributionDifference") %>%
+      as.data.frame() %>% 
+      tibble::rownames_to_column("samplename") %>% 
+      dplyr::mutate(., haemoResult = ifelse(distributionDifference < 1.9, "Clear",
+                                            ifelse(distributionDifference >= 1.9, "Caution", NA)))
+    
+    # plot as histogram side by side
+    q <- ggplot() +
+      geom_histogram(data = plotData_distDiff_dCq,
+                     aes(x = distributionDifference,
+                         fill = haemolysis,
+                         colour = haemolysis,
+                         y = 2*(..density..)/sum(..density..)),
+                     breaks = seq(0,5,0.1),
+                     alpha = 0.6, 
+                     position = "identity",
+                     lwd = 0.8) +
+      geom_histogram(
+        data = unlist_distributionDifference,
+        aes(x = distributionDifference,
+            fill = project,
+            colour = project,
+            y = 2*(..density..)/sum(..density..)),
+        breaks = seq(0,5,0.1),
+        alpha = 0.6, 
+        position = "identity",
+        lwd = 0.8) +
+      geom_vline(show.legend = FALSE,
+                 xintercept = 1.9,
+                 col = 2,
+                 lty = 2) +
+      scale_y_continuous(labels = percent_format()) +
+      labs(
+        title = "Distribution difference using final classifiers",
+        subtitle = "based on three classification groups",
+        x = "Distribution Difference",
+        y = "% samples"
+      ) +
+      theme_bw(base_size = 16)
+    
+    caution <- dim(filter(unlist_distributionDifference, haemoResult == "Caution"))
+    
+    rankDist <- dplyr::full_join(rank1, unlist_distributionDifference, by = "samplename") %>% 
+      dplyr::mutate(., project = rep(project, nrow(.)))
+    
+    q + annotate(
+      geom = "text",
+      x = 3,
+      y = .23,
+      label = paste("we have identified", caution[1], "samples to use with caution", sep = " "),
+      colour = "red"
+    )
     # ggplot(data = as.data.frame(DGEList_public$counts),
     #        aes(x = NPC0031_NPC,
     #        y = PAC0062_PAC)) +
