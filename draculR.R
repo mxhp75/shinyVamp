@@ -5,6 +5,7 @@ library(shiny)
 library(ggrepel)
 library(scales) # For percent_format()
 library(tidyr)
+library(magrittr)
 library(edgeR)
 library(readr)
 library(psych)
@@ -106,7 +107,9 @@ ui <- fluidPage(navbarPage(title = "draculR",
                                                       label = "stringAsFactors",
                                                       value = FALSE),
                                         h5(helpText("Add a project title")),
-                                        textInput("project", "Project", "myProjectName"),
+                                        textInput(inputId = "project",
+                                                  label = "Project",
+                                                          "myProjectName"),
                                         verbatimTextOutput("value"),
                                         radioButtons(inputId = 'sep',
                                                      label = 'Separator',
@@ -119,10 +122,10 @@ ui <- fluidPage(navbarPage(title = "draculR",
                                                      choices = c("miR-106b-3p" = 'hsa-miR-106b-3p',
                                                                  "miR-140-3p" = 'hsa-mir-140-3p',
                                                                  "miR-186-5p" = 'hsa-miR-186-5p',
-                                                                 "miR-425-5p", 'hsa-miR-425-5p',
+                                                                 "miR-425-5p" = 'hsa-miR-425-5p',
                                                                  "miR-142-5p" = 'hsa-miR-142-5p',
                                                                  "miR-532-5p" = 'hsa-miR-532-5p',
-                                                                 "miR-17-5p", 'hsa-miR-17-5p',
+                                                                 "miR-17-5p" = 'hsa-miR-17-5p',
                                                                  "miR-25-3p" = 'hsa-miR-25-3p',
                                                                  "miR-363-3p" = 'hsa-miR-363-3p',
                                                                  "miR-183-5p" = 'hsa-miR-183-5p',
@@ -379,9 +382,9 @@ server <- function(input, output) {
       scale_size(guide = "none") +
       geom_point() +
       scale_x_continuous(name = "Filtered Read Counts",
-                         breaks = seq(round_any(min(rank$readCounts), 10, f = floor), max(rank$readCounts), 1500000)) +
+                         breaks = seq(round_any(min(rank$readCounts), 1000, f = floor), max(rank$readCounts), 10000000)) +
       scale_y_continuous(name = "Mature miRNA Identified",
-                         breaks = seq(round_any(min(rank$unique_miRs), 10, f = floor), max(rank$unique_miRs), 50)) +
+                         breaks = seq(round_any(min(rank$unique_miRs), 100, f = floor), max(rank$unique_miRs), 100)) +
       stat_smooth(method = 'loess',
                   se = FALSE,
                   size = 2) +
@@ -421,6 +424,24 @@ server <- function(input, output) {
     meta <- dplyr::data_frame(samplename = base::colnames(counts)) %>% 
       dplyr::mutate(., copy = samplename) %>% 
       tidyr::separate(., col = copy, into = c("ID", "condition"), sep = "_")
+    
+    # rank the samples by read counts and by unique miRs
+    # this table will be joined downstream with the distribution difference table
+    rank <- base::as.data.frame(base::colSums(counts)) %>%
+      magrittr::set_colnames(., "readCounts") %>% 
+      dplyr::arrange(., -(readCounts)) %>% 
+      tibble::rownames_to_column("samplename") %>% 
+      dplyr::left_join(., meta, by = "samplename") %>% 
+      dplyr::select(., samplename, readCounts, condition) %>% 
+      dplyr::mutate(., rank_readCounts = 1:nrow(.)) %>% 
+      dplyr::full_join(.,
+                       as.data.frame(t(numcolwise(nonzero)(as.data.frame(counts)))) %>%
+                         tibble::rownames_to_column() %>%
+                         magrittr::set_colnames(., c("samplename", "unique_miRs")) %>%
+                         arrange(., desc(unique_miRs)) %>%
+                         mutate(., rank_unique = 1:nrow(.)),
+                       by = "samplename")
+    
     
     # establish a DGEList object
     DGEList_public <- DGEList(counts = counts,
@@ -489,35 +510,49 @@ server <- function(input, output) {
     # define the final set of classifiers
     final_classifiers <- subset(classifier_miRs, SYMBOL %notin% project_miRs$SYMBOL)
 
- 
-    distributionDifference <- for (i in 1:length(varc)){
-      
-      function(x){
-        
-        x <- varc[i]
-        
-        # calculate the geometric mean of the two distributions (1 = classifier, 0 = other, 2 = dropped) 
-        cdat <- ddply(
-          dplyr::select(
-            as.data.frame(cpm(DGEList_public$counts, log = TRUE)), x) %>%
-            tibble::rownames_to_column("mirna") %>% 
-            mutate(., classifier = as.factor(ifelse(mirna %in% final_classifiers$SYMBOL, 1,
-                                                    ifelse(mirna %in% dropped$SYMBOL, 2,
-                                                           ifelse(mirna %notin% classifier_miRs$SYMBOL, 0, NA))))),
-          "classifier", summarise, geometric.mean = psych::geometric.mean(get(x), na.rm = TRUE)
-        )
-        
-        # calculate the difference between the two geometric means (classifier-other)  
-        dplyr::filter(cdat, classifier == 1)$geometric.mean - dplyr::filter(cdat, classifier == 0)$geometric.mean
-        
-      }}
+    # 
+    # distributionDifference <- for (i in 1:length(varc)){
+    #   
+    #   function(x){
+    #     
+    #     x <- varc[i]
+    #     
+    #     # calculate the geometric mean of the two distributions (1 = classifier, 0 = other, 2 = dropped) 
+    #     cdat <- ddply(
+    #       dplyr::select(
+    #         as.data.frame(cpm(DGEList_public$counts, log = TRUE)), x) %>%
+    #         tibble::rownames_to_column("mirna") %>% 
+    #         mutate(., classifier = as.factor(ifelse(mirna %in% final_classifiers$SYMBOL, 1,
+    #                                                 ifelse(mirna %in% dropped$SYMBOL, 2,
+    #                                                        ifelse(mirna %notin% classifier_miRs$SYMBOL, 0, NA))))),
+    #       "classifier", summarise, geometric.mean = psych::geometric.mean(get(x), na.rm = TRUE)
+    #     )
+    #     
+    #     # calculate the difference between the two geometric means (classifier-other)  
+    #     dplyr::filter(cdat, classifier == 1)$geometric.mean - dplyr::filter(cdat, classifier == 0)$geometric.mean
+    #     
+    #   }}
 
+    distributionDifference <- lapply(varc,function(x){
+      # calculate the geometric mean of the two distributions (1 = classifier, 0 = other, 2 = dropped)
+      dtmp <- dplyr::select(as.data.frame(edgeR::cpm(DGEList_public$counts, log = TRUE)), x) %>%
+        tibble::rownames_to_column("mirna") %>% 
+        mutate(., classifier = as.factor(ifelse(mirna %in% final_classifiers$SYMBOL, 1,
+                                                ifelse(mirna %in% dropped$SYMBOL, 2,
+                                                       ifelse(mirna %notin% classifier_miRs$SYMBOL, 0, NA)))))
+      cdat_tmp <- with(dtmp,tapply(get(x),classifier,geometric.mean,na.rm=T))
+      cdat <- data.frame("classifier"=rownames(cdat_tmp),"geometric.mean"=cdat_tmp)
+      # calculate the difference between the two geometric means (classifier-other)  
+      cdat_out <- dplyr::filter(cdat, classifier == 1)$geometric.mean - dplyr::filter(cdat, classifier == 0)$geometric.mean
+      return(cdat_out)
+    })
+    
     names(distributionDifference) <- varc
     
     unlist_distributionDifference <- do.call(cbind.data.frame, distributionDifference) %>% 
       t() %>%
-      set_colnames("distributionDifference") %>%
-      as.data.frame() %>% 
+      magrittr::set_colnames("distributionDifference") %>%
+      base::as.data.frame() %>% 
       tibble::rownames_to_column("samplename") %>% 
       dplyr::mutate(., haemoResult = ifelse(distributionDifference < 1.9, "Clear",
                                             ifelse(distributionDifference >= 1.9, "Caution", NA)))
@@ -536,8 +571,8 @@ server <- function(input, output) {
       geom_histogram(
         data = unlist_distributionDifference,
         aes(x = distributionDifference,
-            fill = project,
-            colour = project,
+            fill = haemoResult,
+            colour = haemoResult,
             y = 2*(..density..)/sum(..density..)),
         breaks = seq(0,5,0.1),
         alpha = 0.6, 
@@ -558,8 +593,8 @@ server <- function(input, output) {
     
     caution <- dim(filter(unlist_distributionDifference, haemoResult == "Caution"))
     
-    rankDist <- dplyr::full_join(rank1, unlist_distributionDifference, by = "samplename") %>% 
-      dplyr::mutate(., project = rep(project, nrow(.)))
+    rankDist <- dplyr::full_join(rank, unlist_distributionDifference, by = "samplename") %>% 
+      dplyr::mutate(., project = rep(input$project, nrow(.)))
     
     q + annotate(
       geom = "text",
@@ -568,10 +603,7 @@ server <- function(input, output) {
       label = paste("we have identified", caution[1], "samples to use with caution", sep = " "),
       colour = "red"
     )
-    # ggplot(data = as.data.frame(DGEList_public$counts),
-    #        aes(x = NPC0031_NPC,
-    #        y = PAC0062_PAC)) +
-    #   geom_point()
+
   })
   
   # the following renderUI is used to dynamically generate the tabsets when the
