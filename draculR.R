@@ -19,6 +19,15 @@ nonzero <- function(x) sum(x != 0)
 # import our distribution difference dataframe
 plotData_distDiff_dCq <- read_csv("www/plotData_distDiff_dCq.csv")
 
+# import the rank and distribtuion difference data for GSE153813
+rank_GSE153813 <- read_csv(file = "www/rank_GSE153813.csv")
+unlistDistributionDifference_GSE153813 <- read_csv(file = "www/unlist_distributionDifference_GSE153813.csv")
+GSE153813_info <- paste("The data containined in GSE153813 were obtained from",
+                        " NCBI GEO. There is no associated publication" , sep = "")
+
+rankDist_GSE153813 <- dplyr::full_join(rank_GSE153813, unlistDistributionDifference_GSE153813, by = "samplename") %>% 
+  dplyr::mutate(., project = rep("GSE153813", nrow(.)))
+
 # import the rank and distribtuion difference data for GSE118038
 rank_GSE118038 <- read_csv(file = "www/rank_GSE118038.csv")
 unlistDistributionDifference_GSE118038 <- read_csv(file = "www/unlist_distributionDifference_GSE118038.csv")
@@ -74,6 +83,7 @@ ui <- fluidPage(navbarPage(title = "draculR",
                                     tags$h5("Click one of these buttons to see the results"),
                                     fluidRow(
                                       column(12,
+                                             actionButton(inputId = "GSE153813", label = "GSE153813"),
                                              actionButton(inputId = "GSE118038", label = "GSE118038"),
                                              actionButton(inputId = "GSE105052", label = "GSE105052"),
                                              actionButton(inputId = "GSE151341", label = "GSE151341"))
@@ -137,7 +147,8 @@ ui <- fluidPage(navbarPage(title = "draculR",
                                                                  "miR-324-5p" = 'hsa-miR-324-5p',
                                                                  "miR-191-5p" = 'hsa-miR-191-5p',
                                                                  "miR-192-5p" = 'hsa-miR-192-5p',
-                                                                 "miR-20b-5p" = 'hsa-miR-20b-5p'))
+                                                                 "miR-20b-5p" = 'hsa-miR-20b-5p'),
+                                                     textOutput("txt"))
                                       ),
                                       mainPanel(
                                         uiOutput("tb")
@@ -156,6 +167,8 @@ ui <- fluidPage(navbarPage(title = "draculR",
 
 server <- function(input, output) {
   
+
+  
   # This reactive function will take the inputs from UI.R and use them for read.table() to read the data from the file. It returns the dataset in the form of a dataframe.
   # file$datapath -> gives the path of the file
   uploadData <- reactive({
@@ -169,8 +182,9 @@ server <- function(input, output) {
   })
   
   # this reactive output will plot according to the public data reactive buttons
-  plotDataPublic_miRNA <- reactiveValues(data = NULL)
+  plotDataPublic_miRNA <- reactiveValues(data = rankDist_GSE153813)
   
+  observeEvent(input$GSE153813, { plotDataPublic_miRNA$data <- rankDist_GSE153813 })
   observeEvent(input$GSE118038, { plotDataPublic_miRNA$data <- rankDist_GSE118038 })
   observeEvent(input$GSE105052, { plotDataPublic_miRNA$data <- rankDist_GSE105052 })
   observeEvent(input$GSE151341, { plotDataPublic_miRNA$data <- rankDist_GSE151341 })
@@ -199,7 +213,7 @@ server <- function(input, output) {
                       box.padding = 1,
                       aes(label = samplename),
                       show.legend = FALSE) +
-      ggtitle(paste(plotDataPublic_miRNA$data$project[1], ": Mature miRNA as a \n function of Read Counts", sep = "")) +
+      ggtitle(paste0(plotDataPublic_miRNA$data$project[1])) +
       theme_bw(base_size = 16) +
       theme(
         axis.title.x = element_text(margin = unit(c(3, 0, 0, 0), "mm")),
@@ -240,11 +254,10 @@ server <- function(input, output) {
                  lty = 2) +
       scale_y_continuous(labels = scales::percent_format()) +
       labs(
-        title = "Distribution difference using final classifiers",
-        subtitle = "based on three classification groups",
         x = "Distribution Difference",
         y = "% samples"
       ) +
+      ggtitle(paste0(plotDataPublic_miRNA$data$project[1])) +
       theme_bw(base_size = 16)
     
     caution <- dim(filter(plotDataPublic_miRNA$data, haemoResult == "Caution"))
@@ -505,33 +518,12 @@ server <- function(input, output) {
     
     
     # define the dropped classifiers
-    dropped <- subset(classifier_miRs, SYMBOL %in% project_miRs$SYMBOL)
+    # dropped <- subset(classifier_miRs, SYMBOL %in% project_miRs$SYMBOL)
+    dropped <- subset(classifier_miRs, SYMBOL %in% input$drop_miRs)
     
     # define the final set of classifiers
     final_classifiers <- subset(classifier_miRs, SYMBOL %notin% project_miRs$SYMBOL)
 
-    # 
-    # distributionDifference <- for (i in 1:length(varc)){
-    #   
-    #   function(x){
-    #     
-    #     x <- varc[i]
-    #     
-    #     # calculate the geometric mean of the two distributions (1 = classifier, 0 = other, 2 = dropped) 
-    #     cdat <- ddply(
-    #       dplyr::select(
-    #         as.data.frame(cpm(DGEList_public$counts, log = TRUE)), x) %>%
-    #         tibble::rownames_to_column("mirna") %>% 
-    #         mutate(., classifier = as.factor(ifelse(mirna %in% final_classifiers$SYMBOL, 1,
-    #                                                 ifelse(mirna %in% dropped$SYMBOL, 2,
-    #                                                        ifelse(mirna %notin% classifier_miRs$SYMBOL, 0, NA))))),
-    #       "classifier", summarise, geometric.mean = psych::geometric.mean(get(x), na.rm = TRUE)
-    #     )
-    #     
-    #     # calculate the difference between the two geometric means (classifier-other)  
-    #     dplyr::filter(cdat, classifier == 1)$geometric.mean - dplyr::filter(cdat, classifier == 0)$geometric.mean
-    #     
-    #   }}
 
     distributionDifference <- lapply(varc,function(x){
       # calculate the geometric mean of the two distributions (1 = classifier, 0 = other, 2 = dropped)
