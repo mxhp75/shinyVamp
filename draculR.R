@@ -517,8 +517,7 @@ server <- function(input, output) {
                                           "hsa-miR-20b-5p"))
     
     
-    # define the dropped classifiers
-    # dropped <- subset(classifier_miRs, SYMBOL %in% project_miRs$SYMBOL)
+    # define the dropped classifiers as input from the groupCheckboxInput
     dropped <- subset(classifier_miRs, SYMBOL %in% input$drop_miRs)
     
     # define the final set of classifiers
@@ -549,6 +548,8 @@ server <- function(input, output) {
       dplyr::mutate(., haemoResult = ifelse(distributionDifference < 1.9, "Clear",
                                             ifelse(distributionDifference >= 1.9, "Caution", NA)))
     
+    unlist_distributionDifference$haemoResult <- as.factor(unlist_distributionDifference$haemoResult)
+    
     # plot as histogram side by side
     q <- ggplot() +
       geom_histogram(data = plotData_distDiff_dCq,
@@ -570,14 +571,17 @@ server <- function(input, output) {
         alpha = 0.6, 
         position = "identity",
         lwd = 0.8) +
+      scale_fill_manual(values = c("#999999", "#E69F00",
+                                     "#56B4E9", "#009E73")) +
+      scale_colour_manual(values = c("#999999", "#E69F00",
+                                   "#56B4E9", "#009E73")) +
       geom_vline(show.legend = FALSE,
                  xintercept = 1.9,
                  col = 2,
                  lty = 2) +
       scale_y_continuous(labels = percent_format()) +
       labs(
-        title = "Distribution difference using final classifiers",
-        subtitle = "based on three classification groups",
+        title = paste0("Distribution difference: ", input$project),
         x = "Distribution Difference",
         y = "% samples"
       ) +
