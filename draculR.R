@@ -8,6 +8,7 @@ library(tidyr)
 library(magrittr)
 library(edgeR)
 library(readr)
+library(DT)
 library(psych)
 
 # User defined functions
@@ -25,6 +26,8 @@ unlistDistributionDifference_GSE153813 <- read_csv(file = "www/unlist_distributi
 GSE153813_info <- paste("The data containined in GSE153813 were obtained from",
                         " NCBI GEO. There is no associated publication" , sep = "")
 
+countsRaw_GSE153813 <- read_csv(file = "www/counts_raw_GSE153813.csv")
+
 rankDist_GSE153813 <- dplyr::full_join(rank_GSE153813, unlistDistributionDifference_GSE153813, by = "samplename") %>% 
   dplyr::mutate(., project = rep("GSE153813", nrow(.)))
 
@@ -38,6 +41,8 @@ GSE118038_info <- paste("The data containined in GSE118038 were obtained from",
                         " obtained in a normalised table hence the \"Mature miRNA as a function of Read Counts\"",
                         " plot is not as expected.", sep = "")
 
+countsRaw_GSE118038 <- read_csv(file = "www/counts_raw_GSE118038.csv")
+
 rankDist_GSE118038 <- dplyr::full_join(rank_GSE118038, unlistDistributionDifference_GSE118038, by = "samplename") %>% 
   dplyr::mutate(., project = rep("GSE118038", nrow(.)))
 
@@ -48,6 +53,8 @@ GSE105052_info <- paste("The data containined in GSE105052 were obtained from",
                         " NCBI GEO and originate from the article \"Small ",
                         " RNA-seq analysis of circulating miRNAs to identify phenotypic variability in",
                         " Friedreich's ataxia patients.\" Sci Data 2018 Mar 6;5:180021.", sep = "")
+
+countsRaw_GSE105052 <- read_csv(file = "www/counts_raw_GSE105052.csv")
 
 rankDist_GSE105052 <- dplyr::full_join(rank_GSE105052, unlistDistributionDifference_GSE105052, by = "samplename") %>% 
   dplyr::mutate(., project = rep("GSE105052", nrow(.)))
@@ -60,6 +67,8 @@ GSE151341_info <- paste("The data containined in c were obtained from",
                         " identifies a distinct signature of circulating microRNAs",
                         " in early radiographic knee osteoarthritis.\"",
                         " Osteoarthritis Cartilage 2020 Nov;28(11):1471-1481.", sep = "")
+
+countsRaw_GSE151341 <- read_csv(file = "www/counts_raw_GSE151341.csv")
 
 rankDist_GSE151341 <- dplyr::full_join(rank_GSE151341, unlistDistributionDifference_GSE151341, by = "samplename") %>% 
   dplyr::mutate(., project = rep("GSE151341", nrow(.)))
@@ -120,14 +129,13 @@ ui <- fluidPage(navbarPage(title = "draculR",
                                       textOutput("projectInfo")
                                     ),
                                     br(),
+                                    fluidRow(column(12, offset = 0,
+                                                    plotOutput("distributionDifference"))
+                                             ),
                                     fluidRow(
                                       column(6, offset = 0,
-                                             plotOutput("mature_miRNA")),
-                                      column(6, offset = 6,
-                                             plotOutput("distributionDifference"))
-                                    )
-                                    
-                           ),
+                                             DT::dataTableOutput("rawCounts"))
+                                    )),
                            
                            tabPanel("Import new data",
                                     sidebarLayout(
@@ -216,9 +224,17 @@ server <- function(input, output) {
   
   output$projectInfo <- renderText({
     paste("You have selected", plotDataPublic_miRNA$data$project[1], ".",get(paste(plotDataPublic_miRNA$data$project[1],"_info", sep = "")))
-  }
-  )
+  })
   
+  # this reactive output will display the raw data according to the public data reactive buttons
+  rawDataPublic_miRNA <- reactiveValues(data = countsRaw_GSE153813)
+  
+  observeEvent(input$GSE153813, { rawDataPublic_miRNA$data <- countsRaw_GSE153813 })
+  observeEvent(input$GSE118038, { rawDataPublic_miRNA$data <- countsRaw_GSE118038 })
+  observeEvent(input$GSE105052, { rawDataPublic_miRNA$data <- countsRaw_GSE105052 })
+  observeEvent(input$GSE151341, { rawDataPublic_miRNA$data <- countsRaw_GSE151341 })
+  
+
   # This reactive function will calculate the distribution difference and be 
   # available in all output tabs
   
@@ -326,42 +342,15 @@ server <- function(input, output) {
     
     dplyr::full_join(rank, unlist_distributionDifference, by = "samplename") %>%
       dplyr::mutate(., project = rep(input$project, nrow(.)))
-    
-    # rankDist <- dplyr::full_join(rank, unlist_distributionDifference, by = "samplename") %>%
-    #   dplyr::mutate(., project = rep(input$project, nrow(.)))
-    
+
   })
   
-  output$mature_miRNA <- renderPlot({
+  
+  output$rawCounts <- DT::renderDataTable({
     
-    ggplot(data = plotDataPublic_miRNA$data,
-           aes(x = readCounts,
-               y = unique_miRs)) +
-      geom_point(aes(colour = haemoResult,
-                     size = 4)) +
-      scale_size(guide = "none") +
-      scale_x_continuous(name = "Filtered Read Counts",
-                         breaks = seq(round_any(min(plotDataPublic_miRNA$data$readCounts), 10, f = floor), max(plotDataPublic_miRNA$data$readCounts), 100000)) +
-      scale_y_continuous(name = "Mature miRNA Identified",
-                         breaks = seq(round_any(min(plotDataPublic_miRNA$data$unique_miRs), 10, f = floor), max(plotDataPublic_miRNA$data$unique_miRs), 50)) +
-      stat_smooth(method = 'loess',
-                  se = FALSE,
-                  size = 2) +
-      geom_text_repel(data = filter(plotDataPublic_miRNA$data, haemoResult == "Caution"),
-                      box.padding = 1,
-                      aes(label = samplename),
-                      show.legend = FALSE) +
-      ggtitle(paste0(plotDataPublic_miRNA$data$project[1])) +
-      theme_bw(base_size = 16) +
-      theme(
-        axis.title.x = element_text(margin = unit(c(3, 0, 0, 0), "mm")),
-        axis.title.y = element_text(margin = unit(c(0, 3, 0, 0), "mm"))
-      ) +
-      theme(
-        axis.text.x = element_text(angle = 270, hjust = 1)
-        ) 
+    rawDataPublic_miRNA$data
     
-  })
+  }, options = list(autoWidth = TRUE, columnDefs = list(list(list(targets='_all', visible=TRUE, width='90') ))))
   
   output$distributionDifference <- renderPlot({
   
