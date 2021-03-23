@@ -6,6 +6,7 @@ library(ggrepel)
 library(scales) # For percent_format()
 library(tidyr)
 library(magrittr)
+library(reshape)
 library(edgeR)
 library(readr)
 library(DT)
@@ -114,8 +115,11 @@ ui <- fluidPage(navbarPage(title = "draculR",
                            ),
                            
                            tabPanel("Public Data Example",
+                                    
                                     br(),
+                                    
                                     tags$h5("Click one of these buttons to see the results"),
+                                    
                                     fluidRow(
                                       column(12,
                                              actionButton(inputId = "GSE153813", label = "GSE153813"),
@@ -123,15 +127,21 @@ ui <- fluidPage(navbarPage(title = "draculR",
                                              actionButton(inputId = "GSE105052", label = "GSE105052"),
                                              actionButton(inputId = "GSE151341", label = "GSE151341"))
                                     ),
+                                    
                                     br(),
+                                    
                                     fluidRow(
                                       column = 8, offset = 0,
                                       textOutput("projectInfo")
                                     ),
+                                    
                                     br(),
+                                    
                                     fluidRow(column(12, offset = 0,
                                                     plotOutput("distributionDifference"))
                                              ),
+                                    br(),
+                                    
                                     fluidRow(
                                       column(6, offset = 0,
                                              DT::dataTableOutput("rawCounts"))
@@ -141,15 +151,15 @@ ui <- fluidPage(navbarPage(title = "draculR",
                                     sidebarLayout(
                                       sidebarPanel(
                                         fileInput("rawDataFile","Upload the file"), # fileinput() function is used to get the file upload control option
-                                        helpText("Default max. file size is 5MB"),
+                                        helpText("Max. file size is 5MB"),
                                         tags$hr(),
                                         h5(helpText("Select the read.table parameters below")),
                                         checkboxInput(inputId = 'header',
                                                       label = 'Header?',
                                                       value = TRUE),
-                                        checkboxInput(inputId = "stringAsFactors",
-                                                      label = "stringAsFactors",
-                                                      value = FALSE),
+                                        # checkboxInput(inputId = "stringAsFactors",
+                                        #               label = "stringAsFactors",
+                                        #               value = FALSE),
                                         h5(helpText("Add a project title")),
                                         textInput(inputId = "project",
                                                   label = "Project",
@@ -160,7 +170,7 @@ ui <- fluidPage(navbarPage(title = "draculR",
                                                      choices = c(Comma = ',',
                                                                  Tab = '\t'),
                                                      selected = ','),
-                                        h5(helpText("Select any miRNA that are DE between your groups")),
+                                        h5(helpText("Select any miRNA that are differentially expressed between your groups")),
                                         checkboxGroupInput(inputId = 'drop_miRs',
                                                      label = "Drop?",
                                                      choices = c("miR-106b-3p" = 'hsa-miR-106b-3p',
@@ -210,7 +220,8 @@ server <- function(input, output) {
     read.table(file = file1$datapath,
                sep = input$sep,
                header = input$header,
-               stringsAsFactors = input$stringAsFactors)
+               # stringsAsFactors = input$stringAsFactors)
+               stringsAsFactors = FALSE)
     
   })
   
@@ -365,16 +376,28 @@ server <- function(input, output) {
                      alpha = 0.6, 
                      position = "identity",
                      lwd = 0.8) +
+      #################
       geom_histogram(
         data = plotDataPublic_miRNA$data,
         aes(x = distributionDifference,
-            fill = project,
-            colour = project,
+            fill = haemoResult,
+            colour = haemoResult,
             y = 2*(..density..)/sum(..density..)),
         breaks = seq(0,5,0.1),
         alpha = 0.6, 
         position = "identity",
         lwd = 0.8) +
+      scale_fill_manual(values = c("#8B0000", "#96CDCD",
+                                   "#A9A9A9", "#CDCDCD"),
+                        name = "Haemolysis",
+                        labels = c(paste("Caution ", plotDataPublic_miRNA$data$project[1], sep = ""), paste("Clear ", plotDataPublic_miRNA$data$project[1], sep = ""),
+                                   "Haemolysed (dCq)", "Clear (dCq)")) +
+      scale_colour_manual(values = c("#8B0000", "#96CDCD",
+                                     "#8B0000", "#96CDCD"),
+                          name = "Haemolysis",
+                          labels = c(paste("Caution ", plotDataPublic_miRNA$data$project[1], sep = ""), paste("Clear ", plotDataPublic_miRNA$data$project[1], sep = ""),
+                                     "Haemolysed (dCq)", "Clear (dCq)")) +
+    #####################
       geom_vline(show.legend = FALSE,
                  xintercept = 1.9,
                  col = 2,
@@ -414,7 +437,71 @@ server <- function(input, output) {
     
     # ordered summary table of results
     distDiff() %>% 
-      dplyr::arrange(., samplename)
+      dplyr::arrange(., samplename) %>% 
+      dplyr::select(., Samplename = samplename,
+                    `Distribution Difference` = distributionDifference,
+                    `Haemolysis Result` = haemoResult,
+                    Project = project)
+    
+  })
+  
+  DGEList_public <- reactive({
+    
+    counts <- uploadData() %>% 
+      dplyr::mutate_if(is.integer, as.numeric) %>%
+      as.data.frame() %>% 
+      tibble::column_to_rownames("mir_name") %>% 
+      replace(is.na(.), 0)
+    
+    # identify samples with < 1 million reads
+    lowCounts <- names(counts[, base::colSums(counts) < 1000000])
+    
+    # remove columns/samples with readcouns less than 1 million
+    counts <- counts[, base::colSums(counts) > 1000000]
+    
+    # reduce any individual count less than five to zero
+    counts[counts < 5] <- 0
+    
+    # remove miRNAs with zero counts in all samples
+    counts <- counts[ base::rowSums(counts)!=0, ]
+    
+    # create the (super) minimal metadata table
+    meta <- dplyr::data_frame(samplename = base::colnames(counts)) %>% 
+      dplyr::mutate(., copy = samplename) %>% 
+      tidyr::separate(., col = copy, into = c("ID", "condition"), sep = "_")
+    
+    # rank the samples by read counts and by unique miRs
+    # this table will be joined downstream with the distribution difference table
+    rank <- base::as.data.frame(base::colSums(counts)) %>%
+      magrittr::set_colnames(., "readCounts") %>% 
+      dplyr::arrange(., -(readCounts)) %>% 
+      tibble::rownames_to_column("samplename") %>% 
+      dplyr::left_join(., meta, by = "samplename") %>% 
+      dplyr::select(., samplename, readCounts, condition) %>% 
+      dplyr::mutate(., rank_readCounts = 1:nrow(.)) %>% 
+      dplyr::full_join(.,
+                       as.data.frame(t(numcolwise(nonzero)(as.data.frame(counts)))) %>%
+                         tibble::rownames_to_column() %>%
+                         magrittr::set_colnames(., c("samplename", "unique_miRs")) %>%
+                         arrange(., desc(unique_miRs)) %>%
+                         mutate(., rank_unique = 1:nrow(.)),
+                       by = "samplename")
+    
+    
+    # establish a DGEList object
+    DGEList_public <- DGEList(counts = counts,
+                              samples = meta)
+    
+    is.na(DGEList_public$counts) %>% table()
+    
+    # calculate normalisation factors and apply to the DGEList object
+    DGEList_public <- calcNormFactors(DGEList_public, method = "TMM")
+    
+    # calculate the CPMs
+    rawCPM <- cpm(DGEList_public, log = FALSE)
+    # remove low expressed genes
+    keep.exprs <- rowSums(rawCPM > 40) >= 12
+    DGEList_public <- DGEList_public[keep.exprs,, keep.lib.sizes = FALSE]
     
   })
   
@@ -431,7 +518,40 @@ server <- function(input, output) {
   output$distributions <- renderPlot({
     if(is.null(uploadData())){return ()}
     
+    # define the final set of classifiers
+    final_classifiers <- subset(classifier_miRs, SYMBOL %notin% input$drop_miRs)
     
+    Clear <- distDiff()$samplename[distDiff()$haemoResult == "Clear"]
+    
+    Caution <- distDiff()$samplename[distDiff()$haemoResult == "Caution"]
+    
+    ClearCounts <- dplyr::select(as.data.frame(cpm(DGEList_public()$counts, log = TRUE)), all_of(Clear)) %>% 
+      tibble::rownames_to_column() %>%
+      melt(., id = "rowname") %>% 
+      left_join(., distDiff(), by = c("variable" = "samplename")) %>% 
+      subset(., rowname %in% final_classifiers$SYMBOL)
+    
+    CautionCounts <- dplyr::select(as.data.frame(cpm(DGEList_public()$counts, log = TRUE)), all_of(Caution)) %>% 
+      tibble::rownames_to_column() %>%
+      melt(., id = "rowname") %>% 
+      left_join(., distDiff(), by = c("variable" = "samplename")) %>% 
+      subset(., rowname %in% final_classifiers$SYMBOL)
+    
+    ggplot() +
+      geom_density(data = ClearCounts, 
+                   alpha = 0.5,
+                   aes(x = value, fill = haemoResult)) +
+      geom_density(data = CautionCounts,
+                   alpha = 0.5,
+                   aes(x = value, fill = haemoResult)) +
+      # geom_vline(aes(xintercept=psych::geometric.mean(CautionCounts$value)),
+      #           color="salmon", linetype="dashed", size=1) +
+      # geom_vline(aes(xintercept=psych::geometric.mean(CautionCounts$value)),
+      #           color="lightblue", linetype="dotted", size=1) +
+      labs(title = paste("TEST"),
+           x = "log2 CPM",
+           y = "Density") +
+      theme_bw(base_size = 16)
     
 
     
@@ -463,10 +583,16 @@ server <- function(input, output) {
         alpha = 0.6,
         position = "identity",
         lwd = 0.8) +
-      scale_fill_manual(values = c("#999999", "#E69F00",
-                                     "#56B4E9", "#009E73")) +
-      scale_colour_manual(values = c("#999999", "#E69F00",
-                                   "#56B4E9", "#009E73")) +
+      scale_fill_manual(values = c("#8B0000", "#96CDCD",
+                                     "#A9A9A9", "#CDCDCD"),
+                        name = "Haemolysis",
+                        labels = c("Caution", "Clear",
+                                   "Haemolysed (dCq)", "Clear (dCq)")) +
+      scale_colour_manual(values = c("#8B0000", "#96CDCD",
+                                   "#8B0000", "#96CDCD"),
+                          name = "Haemolysis",
+                          labels = c("Caution", "Clear",
+                                     "Haemolysed (dCq)", "Clear (dCq)")) +
       geom_vline(show.legend = FALSE,
                  xintercept = 1.9,
                  col = 2,
@@ -484,7 +610,10 @@ server <- function(input, output) {
       geom = "text",
       x = 3,
       y = .23,
-      label = paste("we have identified", dim(filter(distDiff(), haemoResult == "Caution"))[1], "samples to use with caution", sep = " "),
+      label = paste("we have identified",
+                    dim(filter(distDiff(),
+                               haemoResult == "Caution"))[1],
+                    "samples to use with caution", sep = " "),
       colour = "red"
     )
     
@@ -496,9 +625,10 @@ server <- function(input, output) {
   # file is loaded. Until the file is loaded, app will not show the tabset.
   output$tb <- renderUI({
     if(is.null(uploadData()))
-      tags$h3("Test your own plasma miR-Seq data using ", tags$img(src = "drac.png",
-                                                      heigth = 200,
-                                                      width = 200))
+      tags$h3("Test your own plasma miR-Seq data using ",
+              tags$img(src = "drac.png",
+                       heigth = 200,
+                       width = 200))
     else
       tabsetPanel(tabPanel("About file", tableOutput("about")),
                   tabPanel("Data", tableOutput("table")),
