@@ -137,13 +137,13 @@ ui <- fluidPage(navbarPage(title = "draculR",
                                     
                                     br(),
                                     
-                                    fluidRow(column(12, offset = 0,
+                                    fluidRow(column(8, offset = 0,
                                                     plotOutput("distributionDifference"))
                                              ),
                                     br(),
                                     
                                     fluidRow(
-                                      column(6, offset = 0,
+                                      column(8, offset = 0,
                                              DT::dataTableOutput("rawCounts"))
                                     )),
                            
@@ -361,9 +361,14 @@ server <- function(input, output) {
     
     rawDataPublic_miRNA$data
     
-  }, options = list(autoWidth = TRUE, columnDefs = list(list(list(targets='_all', visible=TRUE, width='90') ))))
+  }, options = list(autoWidth = TRUE,
+                    columnDefs = list(list(list(targets='_all',
+                                                visible=TRUE,
+                                                width='90') ))))
   
   output$distributionDifference <- renderPlot({
+    
+    caution <- dim(filter(plotDataPublic_miRNA$data, haemoResult == "Caution"))
   
     # plot as histogram side by side
     p <- ggplot() +
@@ -403,20 +408,23 @@ server <- function(input, output) {
       scale_y_continuous(labels = scales::percent_format()) +
       labs(
         x = "Distribution Difference",
-        y = "% samples"
+        y = "% samples",
+        subtitle = paste("draculR identified", caution[1], "samples to use with caution", sep = " ")
       ) +
       ggtitle(paste0(plotDataPublic_miRNA$data$project[1])) +
-      theme_bw(base_size = 16)
+      theme_bw(base_size = 16) +
+      theme(plot.subtitle=element_text(color="#8B0000"))
     
-    caution <- dim(filter(plotDataPublic_miRNA$data, haemoResult == "Caution"))
+    p
     
-    p + annotate(
-      geom = "text",
-      x = 3,
-      y = .23,
-      label = paste("we have identified", caution[1], "samples to use with caution", sep = " "),
-      colour = "red"
-    )
+    # p + annotate(
+    #   geom = "text",
+    #   size = 10,
+    #   x = 3,
+    #   y = .23,
+    #   label = paste("we have identified", caution[1], "samples to use with caution", sep = " "),
+    #   colour = "red"
+    # )
     
   })
   
@@ -609,23 +617,32 @@ server <- function(input, output) {
       scale_y_continuous(labels = percent_format()) +
       labs(
         title = paste0("Distribution difference: ", input$project),
+        subtitle = paste("draculR identified",
+                         dim(filter(distDiff(),
+                                    haemoResult == "Caution"))[1],
+                         "samples to use with caution", sep = " "),
         x = "Distribution Difference",
         y = "% samples"
+        # y = "Number of Samples"
       ) +
-      theme_bw(base_size = 16)
+      theme_bw(base_size = 16) +
+      theme(plot.subtitle=element_text(color="#8B0000"))
+    
+    q
 
     # print the plot to the screen
-    q + annotate(
-      geom = "text",
-      x = 3,
-      y = .23,
-      label = paste("we have identified",
-                    dim(filter(distDiff(),
-                               haemoResult == "Caution"))[1],
-                    "samples to use with caution", sep = " "),
-      colour = "red"
-    )
-    
+    # q + annotate(
+    #   geom = "text",
+    #   size = 10,
+    #   x = 3,
+    #   y = .23,
+    #   label = paste("we have identified",
+    #                 dim(filter(distDiff(),
+    #                            haemoResult == "Caution"))[1],
+    #                 "samples to use with caution", sep = " "),
+    #   colour = "red"
+    # )
+    # 
 
 
   })
@@ -649,8 +666,6 @@ server <- function(input, output) {
                            fluidRow(
                              selectInput(inputId = "select",
                                          label = "Samplename",
-                                         # choices = list("NPC0031_NPC" = "NPC0031_NPC",
-                                         #                "NPC0043_NPR" = "NPC0043_NPC"),
                                          choices = colnames(DGEList_public()$counts),
                                          selected = NULL)),
                              fluidRow(
