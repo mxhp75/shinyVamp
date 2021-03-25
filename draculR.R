@@ -153,7 +153,7 @@ ui <- fluidPage(navbarPage(title = "draculR",
                                         fileInput("rawDataFile","Upload the file"), # fileinput() function is used to get the file upload control option
                                         helpText("Max. file size is 5MB"),
                                         tags$hr(),
-                                        h5(helpText("Select the read.table parameters below")),
+                                        h5(helpText("Select the input file parameters below")),
                                         checkboxInput(inputId = 'header',
                                                       label = 'Header?',
                                                       value = TRUE),
@@ -166,7 +166,7 @@ ui <- fluidPage(navbarPage(title = "draculR",
                                                           "myProjectName"),
                                         verbatimTextOutput("value"),
                                         radioButtons(inputId = 'sep',
-                                                     label = 'Separator',
+                                                     label = 'File separator',
                                                      choices = c(Comma = ',',
                                                                  Tab = '\t'),
                                                      selected = ','),
@@ -324,7 +324,7 @@ server <- function(input, output) {
     
     
     distributionDifference <- lapply(varc,function(x){
-      # calculate the geometric mean of the two distributions (1 = classifier, 0 = other, 2 = dropped)
+      # calculate the geometric mean of the two distribut ions (1 = classifier, 0 = other, 2 = dropped)
       dtmp <- dplyr::select(as.data.frame(edgeR::cpm(DGEList_public$counts, log = TRUE)), x) %>%
         tibble::rownames_to_column("mirna") %>% 
         mutate(., classifier = as.factor(ifelse(mirna %in% final_classifiers$SYMBOL, 1,
@@ -376,7 +376,6 @@ server <- function(input, output) {
                      alpha = 0.6, 
                      position = "identity",
                      lwd = 0.8) +
-      #################
       geom_histogram(
         data = plotDataPublic_miRNA$data,
         aes(x = distributionDifference,
@@ -397,7 +396,6 @@ server <- function(input, output) {
                           name = "Haemolysis",
                           labels = c(paste("Caution ", plotDataPublic_miRNA$data$project[1], sep = ""), paste("Clear ", plotDataPublic_miRNA$data$project[1], sep = ""),
                                      "Haemolysed (dCq)", "Clear (dCq)")) +
-    #####################
       geom_vline(show.legend = FALSE,
                  xintercept = 1.9,
                  col = 2,
@@ -436,6 +434,7 @@ server <- function(input, output) {
     if(is.null(uploadData())){return ()}
     
     # ordered summary table of results
+    # cut the columns we don't need
     distDiff() %>% 
       dplyr::arrange(., samplename) %>% 
       dplyr::select(., Samplename = samplename,
@@ -521,34 +520,44 @@ server <- function(input, output) {
     # define the final set of classifiers
     final_classifiers <- subset(classifier_miRs, SYMBOL %notin% input$drop_miRs)
     
-    Clear <- distDiff()$samplename[distDiff()$haemoResult == "Clear"]
+    # subset the DGEList for one sample
+    # temp <- as.data.frame(cpm(DGEList_public()$counts, log = TRUE)) %>%
+    #   dplyr::select(., NPC0031_NPC)
     
-    Caution <- distDiff()$samplename[distDiff()$haemoResult == "Caution"]
+    selectData <- reactive({
+      
+      as.data.frame(cpm(DGEList_public()$counts, log = TRUE)) %>%
+        dplyr::select(., input$select)
+      
+    })
     
-    ClearCounts <- dplyr::select(as.data.frame(cpm(DGEList_public()$counts, log = TRUE)), all_of(Clear)) %>% 
-      tibble::rownames_to_column() %>%
-      melt(., id = "rowname") %>% 
-      left_join(., distDiff(), by = c("variable" = "samplename")) %>% 
-      subset(., rowname %in% final_classifiers$SYMBOL)
-    
-    CautionCounts <- dplyr::select(as.data.frame(cpm(DGEList_public()$counts, log = TRUE)), all_of(Caution)) %>% 
-      tibble::rownames_to_column() %>%
-      melt(., id = "rowname") %>% 
-      left_join(., distDiff(), by = c("variable" = "samplename")) %>% 
-      subset(., rowname %in% final_classifiers$SYMBOL)
-    
+
+    # plot side by side densities
     ggplot() +
-      geom_density(data = ClearCounts, 
+      geom_density(data = subset(selectData(), rownames(selectData()) %in% final_classifiers$SYMBOL) %>% 
+                     dplyr::mutate(., colour = rep("Classifier")),
                    alpha = 0.5,
-                   aes(x = value, fill = haemoResult)) +
-      geom_density(data = CautionCounts,
+                   aes(x = !!sym(input$select),
+                       fill = colour,
+                       colour = colour)) +
+      geom_density(data = subset(selectData(), rownames(selectData()) %notin% classifier_miRs) %>% 
+                     dplyr::mutate(., colour = rep("Background")),
                    alpha = 0.5,
-                   aes(x = value, fill = haemoResult)) +
-      # geom_vline(aes(xintercept=psych::geometric.mean(CautionCounts$value)),
-      #           color="salmon", linetype="dashed", size=1) +
-      # geom_vline(aes(xintercept=psych::geometric.mean(CautionCounts$value)),
-      #           color="lightblue", linetype="dotted", size=1) +
-      labs(title = paste("TEST"),
+                   aes(x = !!sym(input$select),
+                       fill = colour,
+                       colour = colour)) +
+      scale_fill_manual(values = c("#96CDCD", "#8B0000"),
+                        name = "miRNA Set",
+                        labels = c("Background", "Classifier")) +
+      scale_colour_manual(values = c("#96CDCD", "#8B0000"),
+                          name = "miRNA Set",
+                          labels = c("Background", "Classifier")) +
+      labs(title = paste(colnames(selectData()), " - ",
+                         distDiff() %>%
+                           dplyr::filter(., samplename == input$select) %>%
+                           dplyr::select(., haemoResult) %>%
+                           .[[1]],
+                         sep = " "),
            x = "log2 CPM",
            y = "Density") +
       theme_bw(base_size = 16)
@@ -633,7 +642,20 @@ server <- function(input, output) {
       tabsetPanel(tabPanel("About file", tableOutput("about")),
                   tabPanel("Data", tableOutput("table")),
                   tabPanel("Results Summary", tableOutput("sum")),
-                  tabPanel("Distributions", plotOutput("distributions")),
+                  tabPanel("Distributions", 
+                           br(),
+                           
+
+                           fluidRow(
+                             selectInput(inputId = "select",
+                                         label = "Samplename",
+                                         # choices = list("NPC0031_NPC" = "NPC0031_NPC",
+                                         #                "NPC0043_NPR" = "NPC0043_NPC"),
+                                         choices = colnames(DGEList_public()$counts),
+                                         selected = NULL)),
+                             fluidRow(
+                               plotOutput("distributions")
+                             )),
                   tabPanel("Distribution Difference", plotOutput("dist_diff")))
   })
   
