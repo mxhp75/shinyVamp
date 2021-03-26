@@ -103,7 +103,8 @@ classifier_miRs <- data.frame(
 ui <- fluidPage(navbarPage(title = "draculR",
                            
                            tabPanel("Instructions",
-                                    tags$h5("This app uses two methods to classify miR-Seq sequencing data from human plasma into risk groups for haemolysis contamination"),
+                                    tags$h5("Welcome to draculR, a Shiny App designed to help you detect red blood cell content contamination in miR-Seq data from human plasma."),
+                                    tags$h5("This App uses a new method to allocate individual samples into risk groups for haemolysis."),
                                     tags$h5(HTML(paste(
                                       "All code used to calculate data shown here is available at the following",
                                       tags$a(href="https://github.com/mxhp75/haemolysis_maternaPlasma.git", "git repository")
@@ -111,7 +112,32 @@ ui <- fluidPage(navbarPage(title = "draculR",
                                     tags$h5(HTML(paste(
                                       "In case you have questions",
                                       tags$a(href="mailto::melanie.smith@adelaide.edu.au", "email me")
-                                    )))
+                                    ))),
+                                    tags$br(),
+                                    tags$h4("Getting started"),
+                                    tags$br(),
+                                    fluidRow(
+                                      
+                                      column(4,
+                                             tags$img(src = "Picture_1.png", height = 300, width = 600)),
+                                      column(4,
+                                             tags$div(HTML(paste("The", tags$b("Public Data Example"), "tab allows you to click through the plot output and raw data of four datasets available on NCBI GEO that we have run through our method. Samples we consider", tags$b("Clear"), "are seen in light blue, those we consider should be used with", tags$b("Caution"), "are seen in scarlet.",
+                                                           sep = " "
+                                                     )))),
+                                      column(4,
+                                             tags$img(src = "drac.png", height = 300, width = 300))
+                                      
+                                    ),
+                                    br(),
+                                    fluidRow(
+                                      
+                                      column(8, 
+                                      tags$div(HTML(paste("To import new data, move to the", tags$b("Import new data"), "tab. From here click", tags$b("Browse"), "to access the required raw counts table from your computer. Importing a new file will populate the main page with a set of tabs that allow you to navigate through the new information. Your count data needs to be either a comma or tab delimited file with samples in the columns and miRNA count observations in the rows. Please ensure your column of miRNA names is titled", tags$b(paste("miRNA", "name", sep = "_")), "and that the miRNA names are in a", tags$b(paste("hsa", "miR", "123", "3p", sep = "-")), "format. Samplenames need to be in a", tags$b(paste("sample", "condition", sep = "_")), "format and should not include white space or special characters.", sep = " ")))
+                           )),
+                                    fluidRow(
+                             
+                                    tags$img(src = "Picture_2.png")
+                           )
                            ),
                            
                            tabPanel("Public Data Example",
@@ -131,7 +157,7 @@ ui <- fluidPage(navbarPage(title = "draculR",
                                     br(),
                                     
                                     fluidRow(
-                                      column = 8, offset = 0,
+                                      column = 6, offset = 0,
                                       textOutput("projectInfo")
                                     ),
                                     
@@ -157,14 +183,22 @@ ui <- fluidPage(navbarPage(title = "draculR",
                                         checkboxInput(inputId = 'header',
                                                       label = 'Header?',
                                                       value = TRUE),
-                                        # checkboxInput(inputId = "stringAsFactors",
-                                        #               label = "stringAsFactors",
-                                        #               value = FALSE),
-                                        h5(helpText("Add a project title")),
-                                        textInput(inputId = "project",
-                                                  label = "Project",
-                                                          "myProjectName"),
-                                        verbatimTextOutput("value"),
+                                        fluidRow(
+                                          column = 6,
+                                          h5(helpText("Add a project title")),
+                                          textInput(inputId = "project",
+                                                    label = "Project",
+                                                    "myProjectName"),
+                                          verbatimTextOutput("value"),
+                                          column = 6, offset = 6,
+                                          h5(helpText("Apply your filtering value")),
+                                          numericInput("filterNum", label = h5("Number in smallest group"), value = 1)
+                                        ),
+                                        # h5(helpText("Add a project title")),
+                                        # textInput(inputId = "project",
+                                        #           label = "Project",
+                                        #                   "myProjectName"),
+                                        # verbatimTextOutput("value"),
                                         radioButtons(inputId = 'sep',
                                                      label = 'File separator',
                                                      choices = c(Comma = ',',
@@ -199,15 +233,15 @@ ui <- fluidPage(navbarPage(title = "draculR",
                                         uiOutput("tb")
                                       )
                                     )
-                           ),
+                           # ),
                             
-                           tabPanel("Machine Learning",
-                                    h3("This tab is currently ",
-                                       tags$img(src = "underConstruction.png",
-                                                    heigth = 300,
-                                                    width = 300)))
-                           
-))
+                           # tabPanel("Machine Learning",
+                           #          h3("This tab is currently ",
+                           #             tags$img(src = "underConstruction.png",
+                           #                          heigth = 300,
+                           #                          width = 300)))
+                           # 
+)))
   
 
 server <- function(input, output) {
@@ -304,7 +338,7 @@ server <- function(input, output) {
     # calculate the CPMs
     rawCPM <- cpm(DGEList_public, log = FALSE)
     # remove low expressed genes
-    keep.exprs <- rowSums(rawCPM > 40) >= 12
+    keep.exprs <- rowSums(rawCPM > 40) >= input$filterNum
     DGEList_public <- DGEList_public[keep.exprs,, keep.lib.sizes = FALSE]
     
     ## calculate the difference between the geometric mean of the distributions
@@ -507,7 +541,7 @@ server <- function(input, output) {
     # calculate the CPMs
     rawCPM <- cpm(DGEList_public, log = FALSE)
     # remove low expressed genes
-    keep.exprs <- rowSums(rawCPM > 40) >= 12
+    keep.exprs <- rowSums(rawCPM > 40) >= input$filterNum
     DGEList_public <- DGEList_public[keep.exprs,, keep.lib.sizes = FALSE]
     
   })
