@@ -11,12 +11,17 @@ library(edgeR)
 library(readr)
 library(DT)
 library(psych)
+library(shinyhelper)
 
-# User defined functions
+##### User defined functions #####
+
 # negate %in%
 `%notin%` <- Negate(`%in%`)
+
 # function (x) to count the number of non-zero records in each column (ie per sample)
 nonzero <- function(x) sum(x != 0)
+
+##################################
 
 # import our distribution difference dataframe
 plotData_distDiff_dCq <- read_csv("www/plotData_distDiff_dCq.csv")
@@ -164,7 +169,17 @@ ui <- fluidPage(navbarPage(title = "draculR",
                                     br(),
                                     
                                     fluidRow(column(8, offset = 0,
-                                                    plotOutput("distributionDifference"))
+                                                    plotOutput(outputId = "distributionDifference") %>% 
+                                                      helper(type = "inline",
+                                                             icon = "exclamation",
+                                                             title = "Legend Help",
+                                                             colour = "red",
+                                                             size = "l",
+                                                             content = c("The colours used here are consistent across all tabs",
+                                                                         "<b>Caution GSE_____<b> = samples from the public data example with a distribution difference > 1.9 and should be used with caution",
+                                                                         "<b>Clear GSE_____<b> = samples from the public data example with a distribution difference < 1.9 and are considered clear for use",
+                                                                         "<b>Haemolysed (dCq)<b> = samples used in this experiment and represent a background of samples with a dCq > 7",
+                                                                         "<b>Clear (dCq)<b> = samples used in this experiment and represent a background of samples with a dCq < 7")))
                                              ),
                                     br(),
                                     
@@ -192,8 +207,11 @@ ui <- fluidPage(navbarPage(title = "draculR",
                                           verbatimTextOutput("value"),
                                           column = 6, offset = 6,
                                           h5(helpText("Apply your filtering value")),
-                                          numericInput("filterNum", label = h5("Number in smallest group"), value = 1)
-                                        ),
+                                          numericInput("filterNum", label = h5("Number in smallest group"), value = 1)) %>% 
+                                          helper(icon = "exclamation",
+                                                 colour = "green",
+                                                 type = "markdown",
+                                                 content = "filtering"),
                                         # h5(helpText("Add a project title")),
                                         # textInput(inputId = "project",
                                         #           label = "Project",
@@ -204,7 +222,11 @@ ui <- fluidPage(navbarPage(title = "draculR",
                                                      choices = c(Comma = ',',
                                                                  Tab = '\t'),
                                                      selected = ','),
-                                        h5(helpText("Select any miRNA that are differentially expressed between your groups")),
+                                        h5(helpText("Select any miRNA that are differentially expressed between your groups ")) %>% 
+                                          helper(icon = "exclamation",
+                                                 colour = "red",
+                                                 type = "markdown",
+                                                 content = "drop"),
                                         checkboxGroupInput(inputId = 'drop_miRs',
                                                      label = "Drop?",
                                                      choices = c("miR-106b-3p" = 'hsa-miR-106b-3p',
@@ -227,8 +249,8 @@ ui <- fluidPage(navbarPage(title = "draculR",
                                                                  "miR-192-5p" = 'hsa-miR-192-5p',
                                                                  "miR-194-5p" = "hsa-miR-194-5p",
                                                                  "miR-20b-5p" = 'hsa-miR-20b-5p'),
-                                                     textOutput("txt"))
-                                      ),
+                                                     textOutput("txt"))),
+                                      
                                       mainPanel(
                                         uiOutput("tb")
                                       )
@@ -245,6 +267,10 @@ ui <- fluidPage(navbarPage(title = "draculR",
   
 
 server <- function(input, output) {
+  
+  # make sure help functions are active
+  observe_helpers(help_dir = "helpfiles",
+                  withMathJax = TRUE)
   
   # This reactive function will take the inputs from UI.R and use them for read.table() to read the data from the file. It returns the dataset in the form of a dataframe.
   # file$datapath -> gives the path of the file
