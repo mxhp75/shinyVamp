@@ -40,12 +40,10 @@ rankDist_GSE153813 <- dplyr::full_join(rank_GSE153813, unlistDistributionDiffere
 # import the rank and distribtuion difference data for GSE118038
 rank_GSE118038 <- read_csv(file = "www/rank_GSE118038.csv")
 unlistDistributionDifference_GSE118038 <- read_csv(file = "www/unlist_distributionDifference_GSE118038.csv")
-GSE118038_info <- paste("The data containined in GSE118038 were obtained from",
+GSE118038_info <- paste("The data contained in GSE118038 were obtained from",
                         " NCBI GEO and originate from the article \"A preliminary study of micro-RNAs",
                         " as minimally invasive biomarkers for the diagnosis of prostate cancer patients.\"",
-                        " J Exp Clin Cancer Res 2021 Feb 23;40(1):79.", " Notably the data was ",
-                        " obtained in a normalised table hence the \"Mature miRNA as a function of Read Counts\"",
-                        " plot is not as expected.", sep = "")
+                        " J Exp Clin Cancer Res 2021 Feb 23;40(1):79.", sep = "")
 
 countsRaw_GSE118038 <- read_csv(file = "www/counts_raw_GSE118038.csv")
 
@@ -435,8 +433,7 @@ server <- function(input, output) {
       geom_histogram(data = plotData_distDiff_dCq,
                      aes(x = distributionDifference,
                          fill = haemolysis,
-                         colour = haemolysis,
-                         y = 2*(..density..)/sum(..density..)),
+                         colour = haemolysis),
                      breaks = seq(0,5,0.1),
                      alpha = 0.6, 
                      position = "identity",
@@ -445,8 +442,7 @@ server <- function(input, output) {
         data = plotDataPublic_miRNA$data,
         aes(x = distributionDifference,
             fill = haemoResult,
-            colour = haemoResult,
-            y = 2*(..density..)/sum(..density..)),
+            colour = haemoResult),
         breaks = seq(0,5,0.1),
         alpha = 0.6, 
         position = "identity",
@@ -465,11 +461,11 @@ server <- function(input, output) {
                  xintercept = 1.9,
                  col = 2,
                  lty = 2) +
-      scale_y_continuous(labels = scales::percent_format()) +
+      scale_y_continuous(breaks = c(seq(1:15))) +
       labs(
         x = "Distribution Difference",
-        y = "% samples",
-        subtitle = paste("draculR identified", caution[1], "samples to use with caution", sep = " ")
+        y = "Number of samples",
+        subtitle = paste("DraculR identified", caution[1], "samples to use with caution", sep = " ")
       ) +
       ggtitle(paste0(plotDataPublic_miRNA$data$project[1])) +
       theme_bw(base_size = 16) +
@@ -644,8 +640,7 @@ server <- function(input, output) {
       geom_histogram(data = plotData_distDiff_dCq,
                      aes(x = distributionDifference,
                          fill = haemolysis,
-                         colour = haemolysis,
-                         y = 2*(..density..)/sum(..density..)),
+                         colour = haemolysis),
                      breaks = seq(0,5,0.1),
                      alpha = 0.4, 
                      position = "identity",
@@ -654,8 +649,7 @@ server <- function(input, output) {
         data = distDiff(),
         aes(x = distributionDifference,
             fill = haemoResult,
-            colour = haemoResult,
-            y = 2*(..density..)/sum(..density..)),
+            colour = haemoResult),
         breaks = seq(0,5,0.1),
         alpha = 0.6,
         position = "identity",
@@ -674,16 +668,15 @@ server <- function(input, output) {
                  xintercept = 1.9,
                  col = 2,
                  lty = 2) +
-      scale_y_continuous(labels = percent_format()) +
+      # scale_y_continuous(labels = percent_format()) +
       labs(
         title = paste0("Distribution difference: ", input$project),
-        subtitle = paste("draculR identified",
+        subtitle = paste("DraculR identified",
                          dim(filter(distDiff(),
                                     haemoResult == "Caution"))[1],
                          "samples to use with caution", sep = " "),
         x = "Distribution Difference",
-        y = "% samples"
-        # y = "Number of Samples"
+        y = "Number of samples"
       ) +
       theme_bw(base_size = 16) +
       theme(plot.subtitle=element_text(color="#8B0000"))
